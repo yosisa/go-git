@@ -16,5 +16,10 @@ Currently, it supports read access only. But supporting write access is planed.
 
 This is just worked but in early development stage, breaking changes maybe introduced suddenly. So please consider to use vendoring.
 
+## Installation
+```
+go get -u github.com/yosisa/go-git/git
+```
+
 ## License
 MIT
