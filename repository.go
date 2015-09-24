@@ -1,10 +1,8 @@
 package git
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
-	"io"
 	"io/ioutil"
 	"os"
 	"path/filepath"
@@ -73,14 +71,14 @@ func (r *Repository) readObject(id SHA1, obj Object, headerOnly bool) (Object, e
 		entry objectEntry
 		err   error
 	)
-	entry, err = newLooseObjectEntry(r.root, id)
-	if err != nil {
-		if r.pack == nil {
-			if err = r.openPack(); err != nil {
-				return nil, err
-			}
+	if r.pack == nil {
+		if err = r.openPack(); err != nil {
+			return nil, err
 		}
-		if entry, err = r.pack.entry(id); err != nil {
+	}
+
+	if entry, err = r.pack.entry(id); err != nil {
+		if entry, err = newLooseObjectEntry(r.root, id); err != nil {
 			return nil, err
 		}
 	}
@@ -93,12 +91,11 @@ func (r *Repository) readObject(id SHA1, obj Object, headerOnly bool) (Object, e
 	if headerOnly {
 		return obj, nil
 	}
-
-	buf := new(bytes.Buffer)
-	if _, err = io.Copy(buf, entry.Reader()); err != nil {
+	b, err := entry.ReadAll()
+	if err != nil {
 		return nil, err
 	}
-	err = obj.Parse(buf.Bytes())
+	err = obj.Parse(b)
 	return obj, err
 }
 

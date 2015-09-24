@@ -36,7 +36,7 @@ func (t *Tag) Parse(data []byte) error {
 		return err
 	}
 
-	obj := newObject(string(kv["type"]), SHA1FromString(string(kv["object"])), t.repo)
+	obj := newObject(string(kv["type"]), SHA1FromHex(kv["object"]), t.repo)
 	tagger, err := newUser(kv["tagger"])
 	if err != nil {
 		return err
@@ -44,7 +44,7 @@ func (t *Tag) Parse(data []byte) error {
 	t.Object = obj
 	t.Tagger = tagger
 	t.Name = string(kv["tag"])
-	t.Data = data[1:]
+	t.Data = cloneBytes(data[1:])
 	return nil
 }
 
