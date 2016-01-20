@@ -3,6 +3,7 @@ package git
 import (
 	"bytes"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/yosisa/go-git/lru"
@@ -88,7 +89,7 @@ func (t *Tree) find(items []string) (*SparseObject, error) {
 var treeEntryCache = lru.New(1 << 16)
 
 type TreeEntry struct {
-	Mode   int
+	Mode   TreeEntryMode
 	Name   string
 	Object *SparseObject
 }
@@ -115,14 +116,33 @@ func (t *TreeEntry) Size() int {
 	return 8 + len(t.Name)
 }
 
-func parseMode(bs []byte) (int, error) {
-	var mode int
+type TreeEntryMode uint32
+
+const (
+	ModeTree    TreeEntryMode = 0040000
+	ModeFile                  = 0100644
+	ModeFileEx                = 0100755
+	ModeSymlink               = 0120000
+)
+
+func parseMode(bs []byte) (TreeEntryMode, error) {
+	var mode TreeEntryMode
 	for _, b := range bs {
 		n := b - 0x30
 		if n < 0 || n > 7 {
 			return 0, fmt.Errorf("%d not in octal range", n)
 		}
-		mode = mode<<3 | int(n)
+		mode = mode<<3 | TreeEntryMode(n)
 	}
 	return mode, nil
+}
+
+func (m TreeEntryMode) String() string {
+	var s string
+	for m > 0 {
+		n := int(m & 0x7)
+		s = strconv.Itoa(n) + s
+		m = m >> 3
+	}
+	return s
 }
