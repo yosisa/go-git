@@ -117,12 +117,12 @@ func (t *TreeEntry) Size() int {
 
 func parseMode(bs []byte) (int, error) {
 	var mode int
-	for i, b := range bs {
+	for _, b := range bs {
 		n := b - 0x30
 		if n < 0 || n > 7 {
 			return 0, fmt.Errorf("%d not in octal range", n)
 		}
-		mode = mode<<uint(i*3) | int(n)
+		mode = mode<<3 | int(n)
 	}
 	return mode, nil
 }
