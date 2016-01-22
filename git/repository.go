@@ -123,7 +123,7 @@ func (r *Repository) openPack() error {
 	return nil
 }
 
-func (r *Repository) writeObject(typ string, data []byte) (id SHA1, err error) {
+func (r *Repository) writeObject(typ string, data ObjectData) (id SHA1, err error) {
 	var path string
 	defer func() {
 		if err != nil && path != "" {
@@ -137,7 +137,7 @@ func (r *Repository) writeObject(typ string, data []byte) (id SHA1, err error) {
 	return
 }
 
-func (r *Repository) writeObjectData(typ string, data []byte) (id SHA1, path string, err error) {
+func (r *Repository) writeObjectData(typ string, data ObjectData) (id SHA1, path string, err error) {
 	var f *os.File
 	if f, err = ioutil.TempFile("", "go-git"); err != nil {
 		return
@@ -150,10 +150,10 @@ func (r *Repository) writeObjectData(typ string, data []byte) (id SHA1, path str
 	hash := sha1.New()
 	w := io.MultiWriter(hash, zw)
 
-	if _, err = fmt.Fprintf(w, "%s %d%c", typ, len(data), 0); err != nil {
+	if _, err = fmt.Fprintf(w, "%s %d%c", typ, data.Size(), 0); err != nil {
 		return
 	}
-	if _, err = w.Write(data); err != nil {
+	if _, err = io.Copy(w, data); err != nil {
 		return
 	}
 	id = SHA1FromBytes(hash.Sum(nil))

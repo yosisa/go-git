@@ -1,6 +1,9 @@
 package git
 
-import "errors"
+import (
+	"errors"
+	"io"
+)
 
 type Object interface {
 	SHA1() SHA1
@@ -62,4 +65,9 @@ func (s *SparseObject) Resolve() (Object, error) {
 		s.obj, s.err = s.repo.Object(s.SHA1)
 	}
 	return s.obj, s.err
+}
+
+type ObjectData interface {
+	io.Reader
+	Size() int64
 }

@@ -109,7 +109,7 @@ func (t *Tree) Write() error {
 		fmt.Fprintf(b, "%s %s%c", entry.Mode, entry.Name, 0)
 		b.Write(entry.Object.SHA1[:])
 	}
-	id, err := t.repo.writeObject("tree", b.Bytes())
+	id, err := t.repo.writeObject("tree", bytes.NewReader(b.Bytes()))
 	if err == nil {
 		t.id = id
 	}

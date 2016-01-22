@@ -70,7 +70,7 @@ func (t *Tag) Write() error {
 	fmt.Fprintf(b, "object %s\ntype %s\ntag %s\ntagger %s\n\n", t.Object.SHA1(), typ, t.Name, t.Tagger)
 	b.Write(t.Data)
 
-	id, err := t.repo.writeObject("tag", b.Bytes())
+	id, err := t.repo.writeObject("tag", bytes.NewReader(b.Bytes()))
 	if err != nil {
 		return err
 	}

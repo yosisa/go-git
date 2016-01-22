@@ -1,8 +1,11 @@
 package git
 
+import "bytes"
+
 type Blob struct {
 	id   SHA1
 	repo *Repository
+	od   ObjectData
 	Data []byte
 }
 
@@ -31,7 +34,10 @@ func (b *Blob) Resolved() bool {
 }
 
 func (b *Blob) Write() error {
-	id, err := b.repo.writeObject("blob", b.Data)
+	if len(b.Data) > 0 {
+		b.od = bytes.NewReader(b.Data)
+	}
+	id, err := b.repo.writeObject("blob", b.od)
 	if err == nil {
 		b.id = id
 	}
@@ -45,9 +51,9 @@ func cloneBytes(b []byte) []byte {
 	return dst
 }
 
-func (r *Repository) NewBlob(data []byte) *Blob {
+func (r *Repository) NewBlob(data ObjectData) *Blob {
 	return &Blob{
 		repo: r,
-		Data: data,
+		od:   data,
 	}
 }

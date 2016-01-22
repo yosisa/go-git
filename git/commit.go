@@ -99,7 +99,7 @@ func (c *Commit) Write() error {
 	fmt.Fprintf(b, "committer %v\n\n", c.Committer)
 	b.Write(c.Data)
 
-	id, err := c.repo.writeObject("commit", b.Bytes())
+	id, err := c.repo.writeObject("commit", bytes.NewReader(b.Bytes()))
 	if err == nil {
 		c.id = id
 	}
