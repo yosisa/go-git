@@ -30,9 +30,24 @@ func (b *Blob) Resolved() bool {
 	return b.Data != nil
 }
 
+func (b *Blob) Write() error {
+	id, err := b.repo.writeObject("blob", b.Data)
+	if err == nil {
+		b.id = id
+	}
+	return err
+}
+
 func cloneBytes(b []byte) []byte {
 	n := len(b)
 	dst := make([]byte, n, n)
 	copy(dst, b)
 	return dst
+}
+
+func (r *Repository) NewBlob(data []byte) *Blob {
+	return &Blob{
+		repo: r,
+		Data: data,
+	}
 }

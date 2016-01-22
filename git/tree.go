@@ -3,6 +3,7 @@ package git
 import (
 	"bytes"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -86,6 +87,35 @@ func (t *Tree) find(items []string) (*SparseObject, error) {
 	return nil, ErrObjectNotFound
 }
 
+func (t *Tree) AddEntry(name string, id SHA1, mode TreeEntryMode) {
+	for _, entry := range t.Entries {
+		if entry.Name == name {
+			entry.Mode = mode
+			entry.Object.SHA1 = id
+			return
+		}
+	}
+	t.Entries = append(t.Entries, &TreeEntry{
+		Mode:   mode,
+		Name:   name,
+		Object: newSparseObject(id, t.repo),
+	})
+}
+
+func (t *Tree) Write() error {
+	sort.Sort(ByName(t.Entries))
+	b := new(bytes.Buffer)
+	for _, entry := range t.Entries {
+		fmt.Fprintf(b, "%s %s%c", entry.Mode, entry.Name, 0)
+		b.Write(entry.Object.SHA1[:])
+	}
+	id, err := t.repo.writeObject("tree", b.Bytes())
+	if err == nil {
+		t.id = id
+	}
+	return err
+}
+
 var treeEntryCache = lru.New(1 << 16)
 
 type TreeEntry struct {
@@ -114,6 +144,13 @@ func newTreeEntry(mode, name, id, row []byte, repo *Repository) (*TreeEntry, err
 
 func (t *TreeEntry) Size() int {
 	return 8 + len(t.Name)
+}
+
+func (t *TreeEntry) canonicalName() string {
+	if t.Mode&ModeTree != 0 {
+		return t.Name + "/"
+	}
+	return t.Name
 }
 
 type TreeEntryMode uint32
@@ -146,3 +183,13 @@ func (m TreeEntryMode) String() string {
 	}
 	return s
 }
+
+func (r *Repository) NewTree() *Tree {
+	return &Tree{repo: r}
+}
+
+type ByName []*TreeEntry
+
+func (z ByName) Len() int           { return len(z) }
+func (z ByName) Swap(i, j int)      { z[i], z[j] = z[j], z[i] }
+func (z ByName) Less(i, j int) bool { return z[i].canonicalName() < z[j].canonicalName() }
