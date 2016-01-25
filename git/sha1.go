@@ -8,6 +8,12 @@ import (
 
 type SHA1 [20]byte
 
+var emptySHA1 SHA1
+
+func (b SHA1) Bytes() []byte {
+	return b[:]
+}
+
 func (b SHA1) String() string {
 	return hex.EncodeToString(b[:])
 }
@@ -19,6 +25,10 @@ func (b SHA1) Compare(other SHA1) int {
 func (b *SHA1) Fill(r io.Reader) error {
 	_, err := io.ReadFull(r, (*b)[:])
 	return err
+}
+
+func (b SHA1) Empty() bool {
+	return b == emptySHA1
 }
 
 func NewSHA1(s string) (sha SHA1, err error) {

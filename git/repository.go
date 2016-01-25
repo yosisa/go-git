@@ -62,7 +62,7 @@ func (r *Repository) Object(id SHA1) (Object, error) {
 }
 
 func (r *Repository) Resolve(obj Object) error {
-	if obj.Resolved() {
+	if obj.Resolved() || obj.SHA1().Empty() {
 		return nil
 	}
 	_, err := r.readObject(obj.SHA1(), obj, false)

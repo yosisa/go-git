@@ -10,6 +10,7 @@ type Object interface {
 	Parse([]byte) error
 	Resolve() error
 	Resolved() bool
+	Write() error
 }
 
 func newObject(typ string, id SHA1, repo *Repository) Object {

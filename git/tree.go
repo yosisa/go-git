@@ -14,6 +14,7 @@ type Tree struct {
 	id      SHA1
 	repo    *Repository
 	Entries []*TreeEntry
+	dirty   bool
 }
 
 func newTree(id SHA1, repo *Repository) *Tree {
@@ -61,8 +62,7 @@ func (t *Tree) Resolved() bool {
 }
 
 func (t *Tree) Find(path string) (*SparseObject, error) {
-	path = strings.TrimLeft(path, "/")
-	return t.find(strings.Split(path, "/"))
+	return t.find(splitPath(path))
 }
 
 func (t *Tree) find(items []string) (*SparseObject, error) {
@@ -87,33 +87,135 @@ func (t *Tree) find(items []string) (*SparseObject, error) {
 	return nil, ErrObjectNotFound
 }
 
-func (t *Tree) AddEntry(name string, id SHA1, mode TreeEntryMode) {
+func (t *Tree) AddEntry(path string, obj Object, mode TreeEntryMode) error {
+	dir, name := splitDirBase(path)
+	tree, err := t.getSubTree(dir, true)
+	if err != nil {
+		return err
+	}
+	tree.addEntry(name, obj, mode)
+	return nil
+}
+
+func (t *Tree) addEntry(name string, obj Object, mode TreeEntryMode) {
+	t.dirty = true
+	sobj := &SparseObject{repo: t.repo, obj: obj}
 	for _, entry := range t.Entries {
 		if entry.Name == name {
 			entry.Mode = mode
-			entry.Object.SHA1 = id
+			entry.Object = sobj
 			return
 		}
 	}
 	t.Entries = append(t.Entries, &TreeEntry{
 		Mode:   mode,
 		Name:   name,
-		Object: newSparseObject(id, t.repo),
+		Object: sobj,
 	})
 }
 
+func (t *Tree) RemoveEntry(path string) error {
+	dir, name := splitDirBase(path)
+	tree, err := t.getSubTree(dir, false)
+	if err != nil {
+		if err == ErrObjectNotFound {
+			return nil
+		}
+		return err
+	}
+	tree.removeEntry(name)
+	return nil
+}
+
+func (t *Tree) removeEntry(name string) {
+	for i, entry := range t.Entries {
+		if entry.Name == name {
+			copy(t.Entries[i:], t.Entries[i+1:])
+			t.Entries = t.Entries[:len(t.Entries)-1]
+			t.dirty = true
+			return
+		}
+	}
+}
+
+func (t *Tree) getSubTree(items []string, create bool) (*Tree, error) {
+	if len(items) == 0 {
+		return t, nil
+	}
+	if err := t.Resolve(); err != nil {
+		return nil, err
+	}
+	for _, entry := range t.Entries {
+		if entry.Name != items[0] {
+			continue
+		}
+		obj, err := entry.Object.Resolve()
+		if err != nil {
+			return nil, err
+		}
+		if tree, ok := obj.(*Tree); ok {
+			return tree.getSubTree(items[1:], create)
+		}
+		break
+	}
+	if !create {
+		return nil, ErrObjectNotFound
+	}
+	tree := t.repo.NewTree()
+	t.addEntry(items[0], tree, ModeTree)
+	return tree.getSubTree(items[1:], create)
+}
+
 func (t *Tree) Write() error {
+	_, err := t.write()
+	return err
+}
+
+// write walks subtrees to check and save dirty objects recursively. To save
+// entire tree correctly, it's necessary to save objects from leaf to root. If
+// something changed in subtrees, the parent tree also need to be saved.
+func (t *Tree) write() (bool, error) {
+	for _, entry := range t.Entries {
+		// It's safe to ignore unresolved objects because it's stored in
+		// the repository and not modified.
+		if entry.Object.obj == nil {
+			continue
+		}
+		if subtree, ok := entry.Object.obj.(*Tree); ok {
+			if changed, err := subtree.write(); err != nil {
+				return false, err
+			} else if changed {
+				t.dirty = true
+			}
+		} else if entry.SHA1().Empty() {
+			if err := entry.Object.obj.Write(); err != nil {
+				return false, err
+			}
+			t.dirty = true
+		}
+	}
+	if !t.dirty {
+		return false, nil
+	}
+
 	sort.Sort(ByName(t.Entries))
 	b := new(bytes.Buffer)
 	for _, entry := range t.Entries {
+		if entry.Object.obj != nil {
+			if subtree, ok := entry.Object.obj.(*Tree); ok && len(subtree.Entries) == 0 {
+				continue // No need to write empty tree object
+			}
+		}
 		fmt.Fprintf(b, "%s %s%c", entry.Mode, entry.Name, 0)
-		b.Write(entry.Object.SHA1[:])
+		b.Write(entry.SHA1().Bytes())
 	}
 	id, err := t.repo.writeObject("tree", bytes.NewReader(b.Bytes()))
-	if err == nil {
-		t.id = id
+	if err != nil {
+		return false, err
 	}
-	return err
+	t.id = id
+	t.dirty = false
+	return true, nil
 }
 
 var treeEntryCache = lru.New(1 << 16)
@@ -153,6 +255,13 @@ func (t *TreeEntry) canonicalName() string {
 	return t.Name
 }
 
+func (t *TreeEntry) SHA1() SHA1 {
+	if t.Object.obj != nil {
+		return t.Object.obj.SHA1()
+	}
+	return t.Object.SHA1
+}
+
 type TreeEntryMode uint32
 
 const (
@@ -182,6 +291,15 @@ func (m TreeEntryMode) String() string {
 		m = m >> 3
 	}
 	return s
+}
+
+func splitPath(path string) []string {
+	return strings.Split(strings.Trim(path, "/"), "/")
+}
+
+func splitDirBase(path string) ([]string, string) {
+	s := splitPath(path)
+	return s[:len(s)-1], s[len(s)-1]
 }
 
 func (r *Repository) NewTree() *Tree {
