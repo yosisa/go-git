@@ -1,10 +1,16 @@
 package git
 
+import (
+	"errors"
+	"io"
+)
+
 type Object interface {
 	SHA1() SHA1
 	Parse([]byte) error
 	Resolve() error
 	Resolved() bool
+	Write() error
 }
 
 func newObject(typ string, id SHA1, repo *Repository) Object {
@@ -19,6 +25,20 @@ func newObject(typ string, id SHA1, repo *Repository) Object {
 		return newTag(id, repo)
 	}
 	panic("Unknown object type: " + typ)
+}
+
+func objectType(obj Object) (string, error) {
+	switch obj.(type) {
+	case *Blob:
+		return "blob", nil
+	case *Tree:
+		return "tree", nil
+	case *Commit:
+		return "commit", nil
+	case *Tag:
+		return "tag", nil
+	}
+	return "", errors.New("Unknown object")
 }
 
 type objectEntry interface {
@@ -46,4 +66,9 @@ func (s *SparseObject) Resolve() (Object, error) {
 		s.obj, s.err = s.repo.Object(s.SHA1)
 	}
 	return s.obj, s.err
+}
+
+type ObjectData interface {
+	io.Reader
+	Size() int64
 }

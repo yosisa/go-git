@@ -1,5 +1,10 @@
 package git
 
+import (
+	"bytes"
+	"fmt"
+)
+
 type Tag struct {
 	id     SHA1
 	repo   *Repository
@@ -54,4 +59,31 @@ func (t *Tag) Resolve() error {
 
 func (t *Tag) Resolved() bool {
 	return t.Object != nil
+}
+
+func (t *Tag) Write() error {
+	typ, err := objectType(t.Object)
+	if err != nil {
+		return err
+	}
+	b := new(bytes.Buffer)
+	fmt.Fprintf(b, "object %s\ntype %s\ntag %s\ntagger %s\n\n", t.Object.SHA1(), typ, t.Name, t.Tagger)
+	b.Write(t.Data)
+
+	id, err := t.repo.writeObject("tag", bytes.NewReader(b.Bytes()))
+	if err != nil {
+		return err
+	}
+	t.id = id
+	return t.repo.NewRef("refs/tags/"+t.Name, t.id).Write()
+}
+
+func (r *Repository) NewTag(name string, obj Object, tagger *User, msg string) *Tag {
+	return &Tag{
+		repo:   r,
+		Object: obj,
+		Name:   name,
+		Tagger: tagger,
+		Data:   []byte(msg),
+	}
 }

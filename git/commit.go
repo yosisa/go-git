@@ -3,6 +3,7 @@ package git
 import (
 	"bytes"
 	"errors"
+	"fmt"
 )
 
 type Commit struct {
@@ -88,6 +89,23 @@ func (c *Commit) IsMerge() bool {
 	return len(c.Parents) != 1
 }
 
+func (c *Commit) Write() error {
+	b := new(bytes.Buffer)
+	fmt.Fprintf(b, "tree %v\n", c.Tree.SHA1())
+	for _, parent := range c.Parents {
+		fmt.Fprintf(b, "parent %v\n", parent.SHA1())
+	}
+	fmt.Fprintf(b, "author %v\n", c.Author)
+	fmt.Fprintf(b, "committer %v\n\n", c.Committer)
+	b.Write(c.Data)
+
+	id, err := c.repo.writeObject("commit", bytes.NewReader(b.Bytes()))
+	if err == nil {
+		c.id = id
+	}
+	return err
+}
+
 var ErrPrefixNotMatch = errors.New("Prefix not match")
 
 func readKV(data []byte, prefix string) ([]byte, []byte, error) {
@@ -99,4 +117,15 @@ func readKV(data []byte, prefix string) ([]byte, []byte, error) {
 		return nil, data, ErrUnknownFormat
 	}
 	return data[len(prefix):pos], data[pos+1:], nil
+}
+
+func (r *Repository) NewCommit(tree *Tree, parents []*Commit, author, committer *User, msg string) *Commit {
+	return &Commit{
+		repo:      r,
+		Tree:      tree,
+		Parents:   parents,
+		Author:    author,
+		Committer: committer,
+		Data:      []byte(msg),
+	}
 }

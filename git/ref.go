@@ -11,9 +11,26 @@ import (
 )
 
 type Ref struct {
+	repo   *Repository
 	Name   string
 	SHA1   SHA1
 	Commit *SHA1
+}
+
+func (r *Ref) Write() error {
+	path := filepath.Join(r.repo.root, r.Name)
+	if err := os.MkdirAll(filepath.Dir(path), 0777); err != nil {
+		return err
+	}
+	return ioutil.WriteFile(path, []byte(r.SHA1.String()+"\n"), 0666)
+}
+
+func (r *Repository) NewRef(name string, id SHA1) *Ref {
+	return &Ref{
+		repo: r,
+		Name: name,
+		SHA1: id,
+	}
 }
 
 type Refs []*Ref
@@ -57,7 +74,7 @@ func (r *Repository) looseRef(name string) (*Ref, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Ref{Name: name, SHA1: SHA1FromHex(b[:len(b)-1])}, nil
+	return r.NewRef(name, SHA1FromHex(b[:len(b)-1])), nil
 }
 
 func (r *Repository) Branches() []*Ref {
@@ -115,13 +132,10 @@ func (r *Repository) Head() (*Ref, error) {
 }
 
 type PackedRefs struct {
+	repo *Repository
 	Path string
 	Err  error
 	refs map[string]*Ref
-}
-
-func OpenPackedRefs(root string) *PackedRefs {
-	return &PackedRefs{Path: filepath.Join(root, "packed-refs")}
 }
 
 func (p *PackedRefs) Ref(name string) *Ref {
@@ -180,13 +194,20 @@ func (p *PackedRefs) Parse() error {
 			return ErrUnknownFormat
 		}
 		name := string(items[1])
-		ref = &Ref{Name: name, SHA1: SHA1FromHex(items[0])}
+		ref = p.repo.NewRef(name, SHA1FromHex(items[0]))
 		p.refs[name] = ref
 	}
 	if err := scan.Err(); err != nil {
 		return err
 	}
 	return nil
+}
+
+func (r *Repository) openPackedRefs() {
+	r.packedRefs = &PackedRefs{
+		repo: r,
+		Path: filepath.Join(r.root, "packed-refs"),
+	}
 }
 
 func refsToMap(refs []*Ref) map[string]*Ref {

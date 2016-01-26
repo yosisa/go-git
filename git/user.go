@@ -3,6 +3,7 @@ package git
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"strconv"
 	"time"
 )
@@ -45,4 +46,16 @@ func newUser(data []byte) (*User, error) {
 	}
 	user.Date = time.Unix(sec, 0).In(t.Location())
 	return &user, nil
+}
+
+func NewUser(name, email string) *User {
+	return &User{
+		Name:  name,
+		Email: email,
+		Date:  time.Now(),
+	}
+}
+
+func (u *User) String() string {
+	return fmt.Sprintf("%s <%s> %d %s", u.Name, u.Email, u.Date.Unix(), u.Date.Format("-0700"))
 }

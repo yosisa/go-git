@@ -3,6 +3,8 @@ package git
 import (
 	"bytes"
 	"fmt"
+	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/yosisa/go-git/lru"
@@ -12,6 +14,7 @@ type Tree struct {
 	id      SHA1
 	repo    *Repository
 	Entries []*TreeEntry
+	dirty   bool
 }
 
 func newTree(id SHA1, repo *Repository) *Tree {
@@ -59,36 +62,157 @@ func (t *Tree) Resolved() bool {
 }
 
 func (t *Tree) Find(path string) (*SparseObject, error) {
-	path = strings.TrimLeft(path, "/")
-	return t.find(strings.Split(path, "/"))
-}
-
-func (t *Tree) find(items []string) (*SparseObject, error) {
-	if err := t.repo.Resolve(t); err != nil {
+	dir, name := splitPath(path)
+	tree, err := t.findSubTree(dir, false)
+	if err != nil {
 		return nil, err
 	}
-	for _, e := range t.Entries {
-		if e.Name == items[0] {
-			if len(items) == 1 {
-				return e.Object, nil
-			}
-			obj, err := e.Object.Resolve()
-			if err != nil {
-				return nil, err
-			}
-			if tree, ok := obj.(*Tree); ok {
-				return tree.find(items[1:])
-			}
-			break
-		}
+	if _, entry := tree.findEntry(name); entry != nil {
+		return entry.Object, nil
 	}
 	return nil, ErrObjectNotFound
+}
+
+func (t *Tree) Add(path string, obj Object, mode TreeEntryMode) error {
+	dir, name := splitPath(path)
+	tree, err := t.findSubTree(dir, true)
+	if err != nil {
+		return err
+	}
+	tree.addEntry(name, obj, mode)
+	return nil
+}
+
+func (t *Tree) addEntry(name string, obj Object, mode TreeEntryMode) {
+	t.dirty = true
+	sobj := &SparseObject{repo: t.repo, obj: obj}
+	if _, entry := t.findEntry(name); entry != nil {
+		entry.Mode = mode
+		entry.Object = sobj
+		return
+	}
+	t.Entries = append(t.Entries, &TreeEntry{
+		Mode:   mode,
+		Name:   name,
+		Object: sobj,
+	})
+}
+
+func (t *Tree) Remove(path string) error {
+	dir, name := splitPath(path)
+	tree, err := t.findSubTree(dir, false)
+	if err != nil {
+		if err == ErrObjectNotFound {
+			return nil
+		}
+		return err
+	}
+	tree.removeEntry(name)
+	return nil
+}
+
+func (t *Tree) removeEntry(name string) {
+	if i, entry := t.findEntry(name); entry != nil {
+		copy(t.Entries[i:], t.Entries[i+1:])
+		t.Entries = t.Entries[:len(t.Entries)-1]
+		t.dirty = true
+		return
+	}
+}
+
+func (t *Tree) findSubTree(items []string, create bool) (*Tree, error) {
+	if err := t.Resolve(); err != nil {
+		return nil, err
+	}
+	return t.findSubTreeInner(items, create)
+}
+
+func (t *Tree) findSubTreeInner(items []string, create bool) (*Tree, error) {
+	if len(items) == 0 {
+		return t, nil
+	}
+	if _, entry := t.findEntry(items[0]); entry != nil {
+		obj, err := entry.Object.Resolve()
+		if err != nil {
+			return nil, err
+		}
+		if tree, ok := obj.(*Tree); ok {
+			return tree.findSubTreeInner(items[1:], create)
+		}
+	}
+	if !create {
+		return nil, ErrObjectNotFound
+	}
+	tree := t.repo.NewTree()
+	t.addEntry(items[0], tree, ModeTree)
+	return tree.findSubTreeInner(items[1:], create)
+}
+
+func (t *Tree) findEntry(name string) (int, *TreeEntry) {
+	for i, entry := range t.Entries {
+		if entry.Name == name {
+			return i, entry
+		}
+	}
+	return 0, nil
+}
+
+func (t *Tree) Write() error {
+	_, err := t.write()
+	return err
+}
+
+// write walks subtrees to check and save dirty objects recursively. To save
+// entire tree correctly, it's necessary to save objects from leaf to root. If
+// something changed in subtrees, the parent tree also need to be saved.
+func (t *Tree) write() (bool, error) {
+	for _, entry := range t.Entries {
+		// It's safe to ignore unresolved objects because it's stored in
+		// the repository and not modified.
+		if entry.Object.obj == nil {
+			continue
+		}
+		if subtree, ok := entry.Object.obj.(*Tree); ok {
+			if changed, err := subtree.write(); err != nil {
+				return false, err
+			} else if changed {
+				t.dirty = true
+			}
+		} else if entry.SHA1().Empty() {
+			if err := entry.Object.obj.Write(); err != nil {
+				return false, err
+			}
+			t.dirty = true
+		}
+	}
+	if !t.dirty {
+		return false, nil
+	}
+
+	sort.Sort(ByName(t.Entries))
+	b := new(bytes.Buffer)
+	for _, entry := range t.Entries {
+		if entry.Object.obj != nil {
+			if subtree, ok := entry.Object.obj.(*Tree); ok && len(subtree.Entries) == 0 {
+				continue // No need to write empty tree object
+			}
+		}
+		fmt.Fprintf(b, "%s %s%c", entry.Mode, entry.Name, 0)
+		b.Write(entry.SHA1().Bytes())
+	}
+	id, err := t.repo.writeObject("tree", bytes.NewReader(b.Bytes()))
+	if err != nil {
+		return false, err
+	}
+	t.id = id
+	t.dirty = false
+	return true, nil
 }
 
 var treeEntryCache = lru.New(1 << 16)
 
 type TreeEntry struct {
-	Mode   int
+	Mode   TreeEntryMode
 	Name   string
 	Object *SparseObject
 }
@@ -115,14 +239,62 @@ func (t *TreeEntry) Size() int {
 	return 8 + len(t.Name)
 }
 
-func parseMode(bs []byte) (int, error) {
-	var mode int
+func (t *TreeEntry) canonicalName() string {
+	if t.Mode&ModeTree != 0 {
+		return t.Name + "/"
+	}
+	return t.Name
+}
+
+func (t *TreeEntry) SHA1() SHA1 {
+	if t.Object.obj != nil {
+		return t.Object.obj.SHA1()
+	}
+	return t.Object.SHA1
+}
+
+type TreeEntryMode uint32
+
+const (
+	ModeTree    TreeEntryMode = 0040000
+	ModeFile                  = 0100644
+	ModeFileEx                = 0100755
+	ModeSymlink               = 0120000
+)
+
+func parseMode(bs []byte) (TreeEntryMode, error) {
+	var mode TreeEntryMode
 	for _, b := range bs {
 		n := b - 0x30
 		if n < 0 || n > 7 {
 			return 0, fmt.Errorf("%d not in octal range", n)
 		}
-		mode = mode<<3 | int(n)
+		mode = mode<<3 | TreeEntryMode(n)
 	}
 	return mode, nil
 }
+
+func (m TreeEntryMode) String() string {
+	var s string
+	for m > 0 {
+		n := int(m & 0x7)
+		s = strconv.Itoa(n) + s
+		m = m >> 3
+	}
+	return s
+}
+
+func splitPath(path string) ([]string, string) {
+	s := strings.Split(strings.Trim(path, "/"), "/")
+	return s[:len(s)-1], s[len(s)-1]
+}
+
+func (r *Repository) NewTree() *Tree {
+	return &Tree{repo: r}
+}
+
+type ByName []*TreeEntry
+
+func (z ByName) Len() int           { return len(z) }
+func (z ByName) Swap(i, j int)      { z[i], z[j] = z[j], z[i] }
+func (z ByName) Less(i, j int) bool { return z[i].canonicalName() < z[j].canonicalName() }

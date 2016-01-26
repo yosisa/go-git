@@ -1,8 +1,11 @@
 package git
 
 import (
+	"compress/zlib"
+	"crypto/sha1"
 	"errors"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"os"
 	"path/filepath"
@@ -33,7 +36,7 @@ func Open(path string) (*Repository, error) {
 	}
 	defer func() {
 		if repo != nil {
-			repo.packedRefs = OpenPackedRefs(repo.root)
+			repo.openPackedRefs()
 		}
 	}()
 	if strings.HasSuffix(path, ".git") {
@@ -59,7 +62,7 @@ func (r *Repository) Object(id SHA1) (Object, error) {
 }
 
 func (r *Repository) Resolve(obj Object) error {
-	if obj.Resolved() {
+	if obj.Resolved() || obj.SHA1().Empty() {
 		return nil
 	}
 	_, err := r.readObject(obj.SHA1(), obj, false)
@@ -118,4 +121,50 @@ func (r *Repository) openPack() error {
 		return errors.New("Found more than 1 pack file")
 	}
 	return nil
+}
+
+func (r *Repository) writeObject(typ string, data ObjectData) (id SHA1, err error) {
+	var path string
+	defer func() {
+		if err != nil && path != "" {
+			os.Remove(path)
+		}
+	}()
+	if id, path, err = r.writeObjectData(typ, data); err != nil {
+		return
+	}
+	err = r.storeAsObject(path, id)
+	return
+}
+
+func (r *Repository) writeObjectData(typ string, data ObjectData) (id SHA1, path string, err error) {
+	var f *os.File
+	if f, err = ioutil.TempFile("", "go-git"); err != nil {
+		return
+	}
+	defer f.Close()
+	path = f.Name()
+
+	zw := zlib.NewWriter(f)
+	defer zw.Close()
+	hash := sha1.New()
+	w := io.MultiWriter(hash, zw)
+
+	if _, err = fmt.Fprintf(w, "%s %d%c", typ, data.Size(), 0); err != nil {
+		return
+	}
+	if _, err = io.Copy(w, data); err != nil {
+		return
+	}
+	id = SHA1FromBytes(hash.Sum(nil))
+	return
+}
+
+func (r *Repository) storeAsObject(path string, id SHA1) error {
+	s := id.String()
+	dir := filepath.Join(r.root, "objects", s[:2])
+	if err := os.MkdirAll(dir, 0777); err != nil {
+		return err
+	}
+	return os.Rename(path, filepath.Join(dir, s[2:]))
 }
