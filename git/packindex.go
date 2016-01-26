@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"crypto/sha1"
 	"encoding/binary"
-	"errors"
 	"io"
 	"os"
 	"sort"
@@ -82,7 +81,7 @@ func (idx *PackIndexV2) Parse(r io.Reader) (err error) {
 		return
 	}
 	if !bytes.Equal(checksum, idx.PackIndexHash[:]) {
-		return errors.New("checksum error")
+		return ErrChecksum
 	}
 	return
 }

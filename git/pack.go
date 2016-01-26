@@ -13,7 +13,10 @@ import (
 
 var packMagic = [4]byte{'P', 'A', 'C', 'K'}
 
-var ErrObjectNotFound = errors.New("Object not found")
+var (
+	ErrChecksum       = errors.New("Incorrect checksum")
+	ErrObjectNotFound = errors.New("Object not found")
+)
 
 var packEntryCache = lru.NewWithEvict(1<<24, func(key interface{}, value interface{}) {
 	value.(*packEntry).Close()
@@ -57,6 +60,16 @@ func (p *Pack) verify() (err error) {
 	}
 	if p.Magic != packMagic || p.Version != 2 {
 		return ErrUnknownFormat
+	}
+	if _, err = p.r.Seek(-20, os.SEEK_END); err != nil {
+		return
+	}
+	var checksum SHA1
+	if err = checksum.Fill(p.r); err != nil {
+		return
+	}
+	if checksum != p.idx.PackFileHash {
+		return ErrChecksum
 	}
 	return
 }
