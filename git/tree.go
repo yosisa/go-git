@@ -73,7 +73,7 @@ func (t *Tree) Find(path string) (*SparseObject, error) {
 	return nil, ErrObjectNotFound
 }
 
-func (t *Tree) AddEntry(path string, obj Object, mode TreeEntryMode) error {
+func (t *Tree) Add(path string, obj Object, mode TreeEntryMode) error {
 	dir, name := splitPath(path)
 	tree, err := t.findSubTree(dir, true)
 	if err != nil {
@@ -98,7 +98,7 @@ func (t *Tree) addEntry(name string, obj Object, mode TreeEntryMode) {
 	})
 }
 
-func (t *Tree) RemoveEntry(path string) error {
+func (t *Tree) Remove(path string) error {
 	dir, name := splitPath(path)
 	tree, err := t.findSubTree(dir, false)
 	if err != nil {
