@@ -85,17 +85,17 @@ func (t *Tree) Add(path string, obj Object, mode TreeEntryMode) error {
 
 func (t *Tree) addEntry(name string, obj Object, mode TreeEntryMode) {
 	t.dirty = true
-	sobj := &SparseObject{repo: t.repo, obj: obj}
-	if _, entry := t.findEntry(name); entry != nil {
-		entry.Mode = mode
-		entry.Object = sobj
-		return
-	}
-	t.Entries = append(t.Entries, &TreeEntry{
+	newEntry := &TreeEntry{
 		Mode:   mode,
 		Name:   name,
-		Object: sobj,
-	})
+		Object: &SparseObject{repo: t.repo, obj: obj},
+	}
+	if i, entry := t.findEntry(name); entry != nil {
+		// Must not modify the entry directly because it's cached
+		t.Entries[i] = newEntry
+		return
+	}
+	t.Entries = append(t.Entries, newEntry)
 }
 
 func (t *Tree) Remove(path string) error {
