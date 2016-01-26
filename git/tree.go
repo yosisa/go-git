@@ -62,34 +62,20 @@ func (t *Tree) Resolved() bool {
 }
 
 func (t *Tree) Find(path string) (*SparseObject, error) {
-	return t.find(splitPath(path))
-}
-
-func (t *Tree) find(items []string) (*SparseObject, error) {
-	if err := t.repo.Resolve(t); err != nil {
+	dir, name := splitPath(path)
+	tree, err := t.findSubTree(dir, false)
+	if err != nil {
 		return nil, err
 	}
-	for _, e := range t.Entries {
-		if e.Name == items[0] {
-			if len(items) == 1 {
-				return e.Object, nil
-			}
-			obj, err := e.Object.Resolve()
-			if err != nil {
-				return nil, err
-			}
-			if tree, ok := obj.(*Tree); ok {
-				return tree.find(items[1:])
-			}
-			break
-		}
+	if _, entry := tree.findEntry(name); entry != nil {
+		return entry.Object, nil
 	}
 	return nil, ErrObjectNotFound
 }
 
 func (t *Tree) AddEntry(path string, obj Object, mode TreeEntryMode) error {
-	dir, name := splitDirBase(path)
-	tree, err := t.getSubTree(dir, true)
+	dir, name := splitPath(path)
+	tree, err := t.findSubTree(dir, true)
 	if err != nil {
 		return err
 	}
@@ -100,12 +86,10 @@ func (t *Tree) AddEntry(path string, obj Object, mode TreeEntryMode) error {
 func (t *Tree) addEntry(name string, obj Object, mode TreeEntryMode) {
 	t.dirty = true
 	sobj := &SparseObject{repo: t.repo, obj: obj}
-	for _, entry := range t.Entries {
-		if entry.Name == name {
-			entry.Mode = mode
-			entry.Object = sobj
-			return
-		}
+	if _, entry := t.findEntry(name); entry != nil {
+		entry.Mode = mode
+		entry.Object = sobj
+		return
 	}
 	t.Entries = append(t.Entries, &TreeEntry{
 		Mode:   mode,
@@ -115,8 +99,8 @@ func (t *Tree) addEntry(name string, obj Object, mode TreeEntryMode) {
 }
 
 func (t *Tree) RemoveEntry(path string) error {
-	dir, name := splitDirBase(path)
-	tree, err := t.getSubTree(dir, false)
+	dir, name := splitPath(path)
+	tree, err := t.findSubTree(dir, false)
 	if err != nil {
 		if err == ErrObjectNotFound {
 			return nil
@@ -128,42 +112,49 @@ func (t *Tree) RemoveEntry(path string) error {
 }
 
 func (t *Tree) removeEntry(name string) {
-	for i, entry := range t.Entries {
-		if entry.Name == name {
-			copy(t.Entries[i:], t.Entries[i+1:])
-			t.Entries = t.Entries[:len(t.Entries)-1]
-			t.dirty = true
-			return
-		}
+	if i, entry := t.findEntry(name); entry != nil {
+		copy(t.Entries[i:], t.Entries[i+1:])
+		t.Entries = t.Entries[:len(t.Entries)-1]
+		t.dirty = true
+		return
 	}
 }
 
-func (t *Tree) getSubTree(items []string, create bool) (*Tree, error) {
-	if len(items) == 0 {
-		return t, nil
-	}
+func (t *Tree) findSubTree(items []string, create bool) (*Tree, error) {
 	if err := t.Resolve(); err != nil {
 		return nil, err
 	}
-	for _, entry := range t.Entries {
-		if entry.Name != items[0] {
-			continue
-		}
+	return t.findSubTreeInner(items, create)
+}
+
+func (t *Tree) findSubTreeInner(items []string, create bool) (*Tree, error) {
+	if len(items) == 0 {
+		return t, nil
+	}
+	if _, entry := t.findEntry(items[0]); entry != nil {
 		obj, err := entry.Object.Resolve()
 		if err != nil {
 			return nil, err
 		}
 		if tree, ok := obj.(*Tree); ok {
-			return tree.getSubTree(items[1:], create)
+			return tree.findSubTreeInner(items[1:], create)
 		}
-		break
 	}
 	if !create {
 		return nil, ErrObjectNotFound
 	}
 	tree := t.repo.NewTree()
 	t.addEntry(items[0], tree, ModeTree)
-	return tree.getSubTree(items[1:], create)
+	return tree.findSubTreeInner(items[1:], create)
+}
+
+func (t *Tree) findEntry(name string) (int, *TreeEntry) {
+	for i, entry := range t.Entries {
+		if entry.Name == name {
+			return i, entry
+		}
+	}
+	return 0, nil
 }
 
 func (t *Tree) Write() error {
@@ -293,12 +284,8 @@ func (m TreeEntryMode) String() string {
 	return s
 }
 
-func splitPath(path string) []string {
-	return strings.Split(strings.Trim(path, "/"), "/")
-}
-
-func splitDirBase(path string) ([]string, string) {
-	s := splitPath(path)
+func splitPath(path string) ([]string, string) {
+	s := strings.Split(strings.Trim(path, "/"), "/")
 	return s[:len(s)-1], s[len(s)-1]
 }
 
