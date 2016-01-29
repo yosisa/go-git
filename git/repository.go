@@ -70,20 +70,9 @@ func (r *Repository) Resolve(obj Object) error {
 }
 
 func (r *Repository) readObject(id SHA1, obj Object, headerOnly bool) (Object, error) {
-	var (
-		entry objectEntry
-		err   error
-	)
-	if r.pack == nil {
-		if err = r.openPack(); err != nil {
-			return nil, err
-		}
-	}
-
-	if entry, err = r.pack.entry(id); err != nil {
-		if entry, err = newLooseObjectEntry(r.root, id); err != nil {
-			return nil, err
-		}
+	entry, err := r.entry(id)
+	if err != nil {
+		return nil, err
 	}
 	defer entry.Close()
 
@@ -100,6 +89,19 @@ func (r *Repository) readObject(id SHA1, obj Object, headerOnly bool) (Object, e
 	}
 	err = obj.Parse(b)
 	return obj, err
+}
+
+func (r *Repository) entry(id SHA1) (objectEntry, error) {
+	if r.pack == nil {
+		if err := r.openPack(); err != nil {
+			return nil, err
+		}
+	}
+
+	if entry, err := r.pack.entry(id); err == nil {
+		return entry, err
+	}
+	return newLooseObjectEntry(r.root, id)
 }
 
 func (r *Repository) openPack() error {

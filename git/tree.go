@@ -10,6 +10,8 @@ import (
 	"github.com/yosisa/go-git/lru"
 )
 
+var scratchbuf = new(bytes.Buffer)
+
 type Tree struct {
 	id      SHA1
 	repo    *Repository
@@ -62,19 +64,89 @@ func (t *Tree) Resolved() bool {
 }
 
 func (t *Tree) Find(path string) (*SparseObject, error) {
-	dir, name := splitPath(path)
-	tree, err := t.findSubTree(dir, false)
-	if err != nil {
-		return nil, err
+	parts := splitPath(path)
+	tree := t
+	var i int
+	for ; i < len(parts); i++ {
+		if !tree.Resolved() {
+			break
+		}
+		_, entry := tree.findEntry(parts[i])
+		if entry == nil {
+			return nil, ErrObjectNotFound
+		}
+		if i == len(parts)-1 {
+			return entry.Object, nil
+		}
+		if entry.Object.obj == nil {
+			tree = t.repo.NewTree()
+			tree.id = entry.Object.SHA1
+			continue
+		}
+		subtree, ok := entry.Object.obj.(*Tree)
+		if !ok {
+			return nil, ErrObjectNotFound
+		}
+		tree = subtree
 	}
-	if _, entry := tree.findEntry(name); entry != nil {
-		return entry.Object, nil
+	return tree.fastFind(parts[i:])
+}
+
+func (t *Tree) fastFind(parts []string) (*SparseObject, error) {
+	id := t.id
+	for _, name := range parts {
+		entry, err := t.repo.entry(id)
+		if err != nil {
+			return nil, err
+		}
+		defer entry.Close()
+
+		if entry.Type() != "tree" {
+			return nil, ErrObjectNotFound
+		}
+		data, err := entry.ReadAll()
+		if err != nil {
+			return nil, err
+		}
+		id, err = findTreeEntryBytes(data, name)
+		if err != nil {
+			return nil, err
+		}
 	}
-	return nil, ErrObjectNotFound
+	return newSparseObject(id, t.repo), nil
+}
+
+func findTreeEntryBytes(data []byte, name string) (id SHA1, err error) {
+	scratchbuf.Reset()
+	scratchbuf.WriteString(name)
+	scratchbuf.WriteByte(0)
+	term := scratchbuf.Bytes()
+	for len(data) > 0 {
+		if data[5] == ' ' {
+			data = data[6:]
+		} else if data[6] == ' ' {
+			data = data[7:]
+		} else {
+			return id, ErrUnknownFormat
+		}
+		n := len(term)
+		if len(data) < n {
+			break
+		}
+		if data[n-1] == 0 && bytes.Equal(data[:n], term) {
+			return SHA1FromBytes(data[n : n+20]), nil
+		}
+		i := bytes.IndexByte(data, 0)
+		if i < 0 {
+			return id, ErrUnknownFormat
+		}
+		data = data[i+21:]
+	}
+	return id, ErrObjectNotFound
 }
 
 func (t *Tree) Add(path string, obj Object, mode TreeEntryMode) error {
-	dir, name := splitPath(path)
+	dir, name := splitDirBase(path)
 	tree, err := t.findSubTree(dir, true)
 	if err != nil {
 		return err
@@ -99,7 +171,7 @@ func (t *Tree) addEntry(name string, obj Object, mode TreeEntryMode) {
 }
 
 func (t *Tree) Remove(path string) error {
-	dir, name := splitPath(path)
+	dir, name := splitDirBase(path)
 	tree, err := t.findSubTree(dir, false)
 	if err != nil {
 		if err == ErrObjectNotFound {
@@ -284,8 +356,12 @@ func (m TreeEntryMode) String() string {
 	return s
 }
 
-func splitPath(path string) ([]string, string) {
-	s := strings.Split(strings.Trim(path, "/"), "/")
+func splitPath(path string) []string {
+	return strings.Split(strings.Trim(path, "/"), "/")
+}
+
+func splitDirBase(path string) ([]string, string) {
+	s := splitPath(path)
 	return s[:len(s)-1], s[len(s)-1]
 }
 
