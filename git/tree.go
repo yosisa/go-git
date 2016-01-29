@@ -147,7 +147,7 @@ func findTreeEntryBytes(data []byte, name string) (id SHA1, err error) {
 
 func (t *Tree) Add(path string, obj Object, mode TreeEntryMode) error {
 	dir, name := splitDirBase(path)
-	tree, err := t.findSubTree(dir, true)
+	tree, err := t.getSubTree(dir, true)
 	if err != nil {
 		return err
 	}
@@ -172,7 +172,7 @@ func (t *Tree) addEntry(name string, obj Object, mode TreeEntryMode) {
 
 func (t *Tree) Remove(path string) error {
 	dir, name := splitDirBase(path)
-	tree, err := t.findSubTree(dir, false)
+	tree, err := t.getSubTree(dir, false)
 	if err != nil {
 		if err == ErrObjectNotFound {
 			return nil
@@ -192,32 +192,44 @@ func (t *Tree) removeEntry(name string) {
 	}
 }
 
-func (t *Tree) findSubTree(items []string, create bool) (*Tree, error) {
+func (t *Tree) getSubTree(parts []string, create bool) (*Tree, error) {
 	if err := t.Resolve(); err != nil {
 		return nil, err
 	}
-	return t.findSubTreeInner(items, create)
-}
-
-func (t *Tree) findSubTreeInner(items []string, create bool) (*Tree, error) {
-	if len(items) == 0 {
-		return t, nil
-	}
-	if _, entry := t.findEntry(items[0]); entry != nil {
+	tree := t
+	var i int
+	for ; i < len(parts); i++ {
+		_, entry := tree.findEntry(parts[i])
+		if entry == nil {
+			break
+		}
 		obj, err := entry.Object.Resolve()
 		if err != nil {
 			return nil, err
 		}
-		if tree, ok := obj.(*Tree); ok {
-			return tree.findSubTreeInner(items[1:], create)
+		subtree, ok := obj.(*Tree)
+		if !ok {
+			break
 		}
+		tree = subtree
+	}
+	if i == len(parts) {
+		return tree, nil
 	}
 	if !create {
 		return nil, ErrObjectNotFound
 	}
-	tree := t.repo.NewTree()
-	t.addEntry(items[0], tree, ModeTree)
-	return tree.findSubTreeInner(items[1:], create)
+	return tree.makeSubTrees(parts[i:]), nil
+}
+
+func (t *Tree) makeSubTrees(parts []string) *Tree {
+	tree := t
+	for _, name := range parts {
+		newTree := t.repo.NewTree()
+		tree.addEntry(name, newTree, ModeTree)
+		tree = newTree
+	}
+	return tree
 }
 
 func (t *Tree) findEntry(name string) (int, *TreeEntry) {
