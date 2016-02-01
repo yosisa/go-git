@@ -241,7 +241,6 @@ func (p *packEntry) ReadAll() ([]byte, error) {
 		if p.buf, err = newBytesBuffer(zr); err != nil {
 			return nil, err
 		}
-		packEntryCache.Add(p.offset, p)
 	}
 	return p.buf.Bytes(), nil
 }
