@@ -101,7 +101,7 @@ func (p *Pack) entry(id SHA1) (*packEntry, error) {
 }
 
 func (p *Pack) entryAt(offset int64) (*packEntry, error) {
-	if pe, ok := packEntryCache.Get(offset); ok {
+	if pe, ok := packEntryCache.Get(pecKey{p.idx.PackFileHash, offset}); ok {
 		if entry := pe.(*packEntry); entry.markInUse() {
 			return entry, nil
 		}
@@ -159,7 +159,7 @@ func (p *Pack) entryAt(offset int64) (*packEntry, error) {
 		if pe.buf, err = applyDelta(entry, delta); err != nil {
 			return nil, err
 		}
-		packEntryCache.Add(offset, pe)
+		packEntryCache.Add(pecKey{p.idx.PackFileHash, offset}, pe)
 		return pe, nil
 	case packEntryRefDelta:
 		id, err := readSHA1(p.r)
@@ -179,14 +179,14 @@ func (p *Pack) entryAt(offset int64) (*packEntry, error) {
 		if pe.buf, err = applyDelta(entry, delta); err != nil {
 			return nil, err
 		}
-		packEntryCache.Add(offset, pe)
+		packEntryCache.Add(pecKey{p.idx.PackFileHash, offset}, pe)
 		return pe, nil
 	default:
 		return nil, fmt.Errorf("Unknown pack entry type: %d", typ)
 	}
 
 	pe.pr = p.r
-	packEntryCache.Add(offset, pe)
+	packEntryCache.Add(pecKey{p.idx.PackFileHash, offset}, pe)
 	return pe, nil
 }
 
@@ -298,4 +298,9 @@ func readPackEntryHeader(br byteReader) (header []packEntryHeader, err error) {
 			return
 		}
 	}
+}
+
+type pecKey struct {
+	checksum SHA1
+	offset   int64
 }
