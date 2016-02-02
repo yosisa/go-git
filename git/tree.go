@@ -351,9 +351,9 @@ type TreeEntryMode uint32
 
 const (
 	ModeTree    TreeEntryMode = 0040000
-	ModeFile                  = 0100644
-	ModeFileEx                = 0100755
-	ModeSymlink               = 0120000
+	ModeFile    TreeEntryMode = 0100644
+	ModeFileEx  TreeEntryMode = 0100755
+	ModeSymlink TreeEntryMode = 0120000
 )
 
 func parseMode(bs []byte) (TreeEntryMode, error) {
