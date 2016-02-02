@@ -14,7 +14,7 @@ type Ref struct {
 	repo   *Repository
 	Name   string
 	SHA1   SHA1
-	Commit *SHA1
+	commit *SHA1
 }
 
 func (r *Ref) Write() error {
@@ -23,6 +23,36 @@ func (r *Ref) Write() error {
 		return err
 	}
 	return ioutil.WriteFile(path, []byte(r.SHA1.String()+"\n"), 0666)
+}
+
+// Commit returns a commit object that the ref points to. It also understand
+// annotated tags. The returned commit object maybe unresolved, it's necessary
+// to call Resolve function before using commit data.
+func (r *Ref) Commit() (*Commit, error) {
+	id := r.SHA1
+	if r.commit != nil {
+		id = *r.commit
+	}
+	obj, err := r.repo.Object(id)
+	if err != nil {
+		return nil, err
+	}
+	for {
+		switch typed := obj.(type) {
+		case *Commit:
+			return typed, nil
+		case *Tag:
+			if c, ok := typed.Object.(*Commit); ok {
+				return c, nil
+			}
+			obj = typed.Object
+			if err = obj.Resolve(); err != nil {
+				return nil, err
+			}
+		default:
+			return nil, ErrTypeMismatch
+		}
+	}
 }
 
 func (r *Repository) NewRef(name string, id SHA1) *Ref {
@@ -186,7 +216,7 @@ func (p *PackedRefs) Parse() error {
 				return ErrUnknownFormat
 			}
 			commit := SHA1FromHex(line[1:])
-			ref.Commit = &commit
+			ref.commit = &commit
 			continue
 		}
 		items := bytes.Split(line, []byte{' '})
