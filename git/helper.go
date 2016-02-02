@@ -36,20 +36,22 @@ func (s *SparseObject) Tag() (*Tag, error) {
 	return asTag(s.Resolve())
 }
 
-func (t *Tree) FindBlob(path string) (*Blob, error) {
-	sobj, err := t.Find(path)
+func (t *Tree) FindBlob(path string) (*Blob, TreeEntryMode, error) {
+	sobj, mode, err := t.Find(path)
 	if err != nil {
-		return nil, err
+		return nil, mode, err
 	}
-	return sobj.Blob()
+	blob, err := sobj.Blob()
+	return blob, mode, err
 }
 
-func (t *Tree) FindTree(path string) (*Tree, error) {
-	sobj, err := t.Find(path)
+func (t *Tree) FindTree(path string) (*Tree, TreeEntryMode, error) {
+	sobj, mode, err := t.Find(path)
 	if err != nil {
-		return nil, err
+		return nil, mode, err
 	}
-	return sobj.Tree()
+	tree, err := sobj.Tree()
+	return tree, mode, err
 }
 
 func asBlob(obj Object, err error) (*Blob, error) {

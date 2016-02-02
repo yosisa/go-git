@@ -63,7 +63,7 @@ func (t *Tree) Resolved() bool {
 	return t.Entries != nil
 }
 
-func (t *Tree) Find(path string) (*SparseObject, error) {
+func (t *Tree) Find(path string) (*SparseObject, TreeEntryMode, error) {
 	parts := splitPath(path)
 	tree := t
 	var i int
@@ -73,10 +73,10 @@ func (t *Tree) Find(path string) (*SparseObject, error) {
 		}
 		_, entry := tree.findEntry(parts[i])
 		if entry == nil {
-			return nil, ErrObjectNotFound
+			return nil, 0, ErrObjectNotFound
 		}
 		if i == len(parts)-1 {
-			return entry.Object, nil
+			return entry.Object, entry.Mode, nil
 		}
 		if entry.Object.obj == nil {
 			tree = t.repo.NewTree()
@@ -85,64 +85,74 @@ func (t *Tree) Find(path string) (*SparseObject, error) {
 		}
 		subtree, ok := entry.Object.obj.(*Tree)
 		if !ok {
-			return nil, ErrObjectNotFound
+			return nil, 0, ErrObjectNotFound
 		}
 		tree = subtree
 	}
 	return tree.fastFind(parts[i:])
 }
 
-func (t *Tree) fastFind(parts []string) (*SparseObject, error) {
+func (t *Tree) fastFind(parts []string) (*SparseObject, TreeEntryMode, error) {
 	id := t.id
+	mode := ModeTree
 	for _, name := range parts {
+		if mode != ModeTree {
+			return nil, 0, ErrObjectNotFound
+		}
 		entry, err := t.repo.entry(id)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		defer entry.Close()
 
 		if entry.Type() != "tree" {
-			return nil, ErrObjectNotFound
+			return nil, 0, ErrObjectNotFound
 		}
 		data, err := entry.ReadAll()
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
-		id, err = findTreeEntryBytes(data, name)
+		id, mode, err = findTreeEntryBytes(data, name)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 	}
-	return newSparseObject(id, t.repo), nil
+	return newSparseObject(id, t.repo), mode, nil
 }
 
-func findTreeEntryBytes(data []byte, name string) (id SHA1, err error) {
+func findTreeEntryBytes(data []byte, name string) (id SHA1, mode TreeEntryMode, err error) {
 	scratchbuf.Reset()
 	scratchbuf.WriteString(name)
 	scratchbuf.WriteByte(0)
 	term := scratchbuf.Bytes()
 	for len(data) > 0 {
+		var i int
 		if data[5] == ' ' {
-			data = data[6:]
+			i = 5
 		} else if data[6] == ' ' {
-			data = data[7:]
+			i = 6
 		} else {
-			return id, ErrUnknownFormat
+			return id, 0, ErrUnknownFormat
 		}
+		if mode, err = parseMode(data[:i]); err != nil {
+			return
+		}
+		data = data[i+1:]
+
 		n := len(term)
 		if len(data) < n {
 			break
 		}
 		if data[n-1] == 0 && bytes.Equal(data[:n], term) {
-			return SHA1FromBytes(data[n : n+20]), nil
+			return SHA1FromBytes(data[n : n+20]), mode, nil
 		}
-		i := bytes.IndexByte(data, 0)
+		i = bytes.IndexByte(data, 0)
 		if i < 0 {
-			return id, ErrUnknownFormat
+			return id, 0, ErrUnknownFormat
 		}
 		data = data[i+21:]
 	}
-	return id, ErrObjectNotFound
+	return id, 0, ErrObjectNotFound
 }
 
 func (t *Tree) Add(path string, obj Object, mode TreeEntryMode) error {
