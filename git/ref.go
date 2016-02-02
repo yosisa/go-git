@@ -82,12 +82,25 @@ func (refs Refs) find(suffix string) *Ref {
 	return nil
 }
 
+// Ref loads ref that has given name.  It only accepts full name. If it's not
+// certain about what kind of refs, FindRef maybe helpful.
 func (r *Repository) Ref(name string) (*Ref, error) {
 	if ref, err := r.looseRef(name); err == nil {
 		return ref, nil
 	}
 	if ref := r.packedRefs.Ref(name); ref != nil {
 		return ref, nil
+	}
+	return nil, fmt.Errorf("Ref not found: %s", name)
+}
+
+// FindRef searches ref that has given name. Both full name and omitted name are
+// accepted like git command.
+func (r *Repository) FindRef(name string) (*Ref, error) {
+	for _, s := range candidateRefs(name) {
+		if ref, err := r.Ref(s); err == nil {
+			return ref, nil
+		}
 	}
 	return nil, fmt.Errorf("Ref not found: %s", name)
 }
@@ -253,4 +266,16 @@ func mapToRefs(m map[string]*Ref) (refs []*Ref) {
 		refs = append(refs, ref)
 	}
 	return
+}
+
+// candidateRefs expands name to possible full names. The order of priority is
+// tags, heads and remotes from high to low.
+func candidateRefs(name string) []string {
+	candidates := []string{name}
+	parts := strings.SplitN(name, "/", 2)
+	switch parts[0] {
+	case "tags", "heads", "remotes":
+		candidates = append(candidates, "refs/"+name)
+	}
+	return append(candidates, "refs/tags/"+name, "refs/heads/"+name, "refs/remotes/"+name)
 }
