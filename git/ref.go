@@ -279,3 +279,13 @@ func candidateRefs(name string) []string {
 	}
 	return append(candidates, "refs/tags/"+name, "refs/heads/"+name, "refs/remotes/"+name)
 }
+
+// BranchRef returns full ref name of given branch name.
+func BranchRef(name string) string {
+	return "refs/heads/" + name
+}
+
+// TagRef returns full ref name of given tag name.
+func TagRef(name string) string {
+	return "refs/tags/" + name
+}
