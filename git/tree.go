@@ -77,7 +77,7 @@ func (t *Tree) Find(path string) (*SparseObject, TreeEntryMode, error) {
 		}
 		if entry.Object.obj == nil {
 			tree = t.repo.NewTree()
-			tree.id = entry.Object.SHA1
+			tree.id = entry.Object.SHA1()
 			continue
 		}
 		subtree, ok := entry.Object.obj.(*Tree)
@@ -268,8 +268,8 @@ func (t *Tree) write() (bool, error) {
 			} else if changed {
 				t.dirty = true
 			}
-		} else if entry.SHA1().Empty() {
-			if err := entry.Object.obj.Write(); err != nil {
+		} else if entry.Object.SHA1().Empty() {
+			if err := entry.Object.Write(); err != nil {
 				return false, err
 			}
 			t.dirty = true
@@ -288,7 +288,7 @@ func (t *Tree) write() (bool, error) {
 			}
 		}
 		fmt.Fprintf(b, "%s %s%c", entry.Mode, entry.Name, 0)
-		b.Write(entry.SHA1().Bytes())
+		b.Write(entry.Object.SHA1().Bytes())
 	}
 	id, err := t.repo.writeObject("tree", bytes.NewReader(b.Bytes()))
 	if err != nil {
@@ -327,13 +327,6 @@ func (t *TreeEntry) canonicalName() string {
 		return t.Name + "/"
 	}
 	return t.Name
-}
-
-func (t *TreeEntry) SHA1() SHA1 {
-	if t.Object.obj != nil {
-		return t.Object.obj.SHA1()
-	}
-	return t.Object.SHA1
 }
 
 type TreeEntryMode uint32

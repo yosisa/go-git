@@ -48,7 +48,7 @@ type objectEntry interface {
 }
 
 type SparseObject struct {
-	SHA1 SHA1
+	id   SHA1
 	obj  Object
 	err  error
 	repo *Repository
@@ -56,16 +56,34 @@ type SparseObject struct {
 
 func newSparseObject(id SHA1, repo *Repository) *SparseObject {
 	return &SparseObject{
-		SHA1: id,
+		id:   id,
 		repo: repo,
 	}
 }
 
+func (s *SparseObject) SHA1() SHA1 {
+	if s.obj != nil {
+		return s.obj.SHA1()
+	}
+	return s.id
+}
+
 func (s *SparseObject) Resolve() (Object, error) {
 	if s.obj == nil && s.err == nil {
-		s.obj, s.err = s.repo.Object(s.SHA1)
+		s.obj, s.err = s.repo.Object(s.id)
 	}
 	return s.obj, s.err
+}
+
+func (s *SparseObject) Write() error {
+	if s.obj == nil {
+		return nil
+	}
+	if err := s.obj.Write(); err != nil {
+		return err
+	}
+	s.id = s.obj.SHA1()
+	return nil
 }
 
 type ObjectData interface {
