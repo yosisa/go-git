@@ -6,8 +6,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-
-	"github.com/yosisa/go-git/lru"
 )
 
 var scratchbuf = new(bytes.Buffer)
@@ -44,8 +42,7 @@ func (t *Tree) Parse(data []byte) error {
 		}
 		name, id, rest = rest[:pos], rest[pos+1:pos+21], rest[pos+21:]
 
-		last := len(mode) + len(name) + 22
-		entry, err := newTreeEntry(mode, name, id, data[:last], t.repo)
+		entry, err := newTreeEntry(mode, name, id, t.repo)
 		if err != nil {
 			return err
 		}
@@ -167,17 +164,16 @@ func (t *Tree) Add(path string, obj Object, mode TreeEntryMode) error {
 
 func (t *Tree) addEntry(name string, obj Object, mode TreeEntryMode) {
 	t.dirty = true
-	newEntry := &TreeEntry{
+	if _, entry := t.findEntry(name); entry != nil {
+		entry.Mode = mode
+		entry.Object = &SparseObject{repo: t.repo, obj: obj}
+		return
+	}
+	t.Entries = append(t.Entries, &TreeEntry{
 		Mode:   mode,
 		Name:   name,
 		Object: &SparseObject{repo: t.repo, obj: obj},
-	}
-	if i, entry := t.findEntry(name); entry != nil {
-		// Must not modify the entry directly because it's cached
-		t.Entries[i] = newEntry
-		return
-	}
-	t.Entries = append(t.Entries, newEntry)
+	})
 }
 
 func (t *Tree) Remove(path string) error {
@@ -303,19 +299,13 @@ func (t *Tree) write() (bool, error) {
 	return true, nil
 }
 
-var treeEntryCache = lru.New(1 << 16)
-
 type TreeEntry struct {
 	Mode   TreeEntryMode
 	Name   string
 	Object *SparseObject
 }
 
-func newTreeEntry(mode, name, id, row []byte, repo *Repository) (*TreeEntry, error) {
-	key := string(row)
-	if entry, ok := treeEntryCache.Get(key); ok {
-		return entry.(*TreeEntry), nil
-	}
+func newTreeEntry(mode, name, id []byte, repo *Repository) (*TreeEntry, error) {
 	m, err := parseMode(mode)
 	if err != nil {
 		return nil, err
@@ -325,7 +315,6 @@ func newTreeEntry(mode, name, id, row []byte, repo *Repository) (*TreeEntry, err
 		Name:   string(name),
 		Object: newSparseObject(SHA1FromBytes(id), repo),
 	}
-	treeEntryCache.Add(key, entry)
 	return entry, nil
 }
 
