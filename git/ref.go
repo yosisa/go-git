@@ -25,6 +25,17 @@ func (r *Ref) Write() error {
 	return ioutil.WriteFile(path, []byte(r.SHA1.String()+"\n"), 0666)
 }
 
+func (r *Ref) Delete() error {
+	if r.Name == "" {
+		return nil
+	}
+	err := os.Remove(filepath.Join(r.repo.root, r.Name))
+	if os.IsNotExist(err) {
+		return nil
+	}
+	return err
+}
+
 // Commit returns a commit object that the ref points to. It also understand
 // annotated tags. The returned commit object maybe unresolved, it's necessary
 // to call Resolve function before using commit data.
