@@ -3,7 +3,6 @@ package git
 import (
 	"compress/zlib"
 	"crypto/sha1"
-	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -16,7 +15,7 @@ type Repository struct {
 	Path       string
 	Bare       bool
 	root       string
-	pack       *Pack
+	packs      []*Pack
 	packedRefs *PackedRefs
 }
 
@@ -92,14 +91,16 @@ func (r *Repository) readObject(id SHA1, obj Object, headerOnly bool) (Object, e
 }
 
 func (r *Repository) entry(id SHA1) (objectEntry, error) {
-	if r.pack == nil {
+	if r.packs == nil {
 		if err := r.openPack(); err != nil {
 			return nil, err
 		}
 	}
 
-	if entry, err := r.pack.entry(id); err == nil {
-		return entry, err
+	for _, pack := range r.packs {
+		if entry, err := pack.entry(id); err == nil {
+			return entry, err
+		}
 	}
 	return newLooseObjectEntry(r.root, id)
 }
@@ -110,18 +111,15 @@ func (r *Repository) openPack() error {
 	if err != nil {
 		return err
 	}
-	switch len(files) {
-	case 0: // set empty pack
-		r.pack = &Pack{idx: &PackIndexV2{}}
-	case 1:
-		pack, err := OpenPack(files[0])
+	packs := []*Pack{}
+	for _, file := range files {
+		pack, err := OpenPack(file)
 		if err != nil {
 			return err
 		}
-		r.pack = pack
-	default:
-		return errors.New("Found more than 1 pack file")
+		packs = append(packs, pack)
 	}
+	r.packs = packs
 	return nil
 }
 
