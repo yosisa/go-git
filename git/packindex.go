@@ -93,10 +93,16 @@ func (idx *PackIndexV2) Entry(id SHA1) *PackIndexEntry {
 	}
 	upper := int(idx.Fanout[int(id[0])])
 	entries := idx.Objects[lower:upper]
+
+	var found bool
 	x := sort.Search(len(entries), func(i int) bool {
-		return entries[i].Compare(id) >= 0
+		n := entries[i].Compare(id)
+		if n == 0 {
+			found = true
+		}
+		return n >= 0
 	})
-	if x == len(entries) {
+	if !found {
 		return nil
 	}
 	x += lower
